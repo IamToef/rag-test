@@ -43,7 +43,7 @@ Nhiệm vụ của bạn: Trả lời **tất cả câu hỏi bằng tiếng Vi�
    - [ghi lại thông tin có trong tài liệu]
 
    **Thông tin chưa có trong tài liệu:**
-   - [không thêm thông tin gì thêm]"
+   - [Nếu bạn cần thêm thông tin, vui lòng tham khảo mục hướng dẫn có liên quan hoặc liên hệ support team để được hỗ trợ]"
 
 --------------------------
 **Tài liệu tham chiếu:**
