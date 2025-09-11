@@ -1,7 +1,6 @@
 flask
 langchain
 langchain-ollama
-faiss-cpu
 docx2txt
 pillow
 pytesseract
@@ -11,3 +10,5 @@ unstructured
 python-pptx
 openpyxl
 pdfminer.six
+qdrant-client
+langchain-qdrant
