@@ -1,10 +1,12 @@
+# utils/ingest.py
 import hashlib
 import logging
-from typing import List, Set
+from typing import Set, Optional, List
 
 from langchain_qdrant import QdrantVectorStore
 from qdrant_client import QdrantClient
 from qdrant_client.http.models import Distance, VectorParams
+from langchain.schema import Document
 
 from .embedder import get_embedder
 from .chunker import chunk_documents
@@ -21,7 +23,12 @@ def ensure_collection_exists(
     distance: Distance = Distance.COSINE,
 ) -> None:
     """Đảm bảo collection tồn tại trong Qdrant, nếu chưa có thì tạo mới."""
-    collections = client.get_collections().collections
+    try:
+        collections = client.get_collections().collections
+    except Exception as e:
+        logger.warning(f"Không lấy được danh sách collection: {e}")
+        collections = []
+
     if not any(c.name == collection_name for c in collections):
         logger.info(f"Tạo collection mới: {collection_name}")
         client.create_collection(
@@ -38,11 +45,32 @@ def get_chunk_id(text: str) -> str:
 
 
 def get_existing_chunk_ids(client: QdrantClient, collection_name: str) -> Set[str]:
-    """Lấy set ID của các chunk đã có trong collection"""
+    """
+    Lấy set ID của các chunk đã có trong collection.
+    Thực hiện robustly vì client.scroll() trả về kiểu khác nhau giữa các phiên bản.
+    """
     existing_ids: Set[str] = set()
     try:
-        scroll = client.scroll(collection_name=collection_name, limit=10000)
-        existing_ids = {p.id for p in scroll.points if p.id is not None}
+        resp = client.scroll(collection_name=collection_name, limit=10000, with_payload=False, with_vectors=False)
+
+        # resp có thể là:
+        # - tuple/list: (points, next_page)
+        # - object có attribute 'points'
+        # - list of points
+        if isinstance(resp, (tuple, list)):
+            points = resp[0]
+        elif hasattr(resp, "points"):
+            points = resp.points
+        else:
+            points = resp  # fallback
+
+        for p in points:
+            # p có thể là object (has attr id) hoặc dict
+            pid = getattr(p, "id", None)
+            if pid is None and isinstance(p, dict):
+                pid = p.get("id")
+            if pid is not None:
+                existing_ids.add(str(pid))
     except Exception as e:
         logger.warning(f"Không lấy được IDs hiện có: {e}")
     return existing_ids
@@ -51,59 +79,80 @@ def get_existing_chunk_ids(client: QdrantClient, collection_name: str) -> Set[st
 def build_vectorstore(
     folder_path: str = "data",
     collection_name: str = "docs",
-    host: str = "localhost",
-    port: int = 6333,
+    host: Optional[str] = None,
+    port: Optional[int] = None,
+    url: Optional[str] = None,
+    api_key: Optional[str] = None,
 ) -> QdrantVectorStore:
     """
     Build hoặc thêm tài liệu mới vào vectorstore trong Qdrant với duplicate check.
-    """
-    # --- Khởi tạo embedder và client ---
-    embeddings = get_embedder()
-    client = QdrantClient(host=host, port=port)
 
-    # --- Lấy dimension từ 1 embedding mẫu ---
+    - Nếu `url` + `api_key` được cung cấp => kết nối Qdrant Cloud
+    - Ngược lại => dùng host/port (local)
+    """
+
+    # 1. Khởi tạo embedder
+    embeddings = get_embedder()
+
+    # 2. Khởi tạo Qdrant client (cloud hoặc local)
+    if url and api_key:
+        logger.info("Kết nối Qdrant Cloud...")
+        client = QdrantClient(url=url, api_key=api_key)
+    else:
+        host_val = host or "localhost"
+        port_val = port or 6333
+        logger.info(f"Kết nối Qdrant Local tại {host_val}:{port_val} ...")
+        client = QdrantClient(host=host_val, port=port_val)
+
+    # 3. Lấy dimension từ 1 embedding mẫu (để tạo collection nếu cần)
     test_vector = embeddings.embed_query("dimension check")
     vector_size = len(test_vector)
 
-    # --- Đảm bảo collection tồn tại ---
+    # 4. Đảm bảo collection tồn tại
     ensure_collection_exists(client, collection_name, vector_size)
 
-    # --- Load tài liệu ---
+    # 5. Load tài liệu từ folder và chunk
     logger.info(f"Đang load tài liệu từ: {folder_path}")
     docs = load_documents_from_folder(folder_path)
     if not docs:
         raise ValueError(f"Không tìm thấy tài liệu trong {folder_path}")
 
-    # --- Chunk tài liệu ---
     chunks = chunk_documents(docs)
     if not chunks:
         raise ValueError("Chunking thất bại - không có chunk nào")
     logger.info(f"Đã split thành {len(chunks)} chunks")
 
-    # --- Duplicate check ---
+    # 6. Lấy IDs hiện có trong collection (nếu có)
     existing_ids = get_existing_chunk_ids(client, collection_name)
-    new_chunks = []
+    logger.info(f"Đã có {len(existing_ids)} chunk trong collection '{collection_name}'")
+
+    # 7. Tạo list chunk mới (unique) và thêm metadata chunk_id
+    new_chunks: List[Document] = []
     for chunk in chunks:
-        chunk_id = get_chunk_id(chunk.page_content)
-        if chunk_id not in existing_ids:
-            chunk.metadata["chunk_id"] = chunk_id
+        cid = get_chunk_id(chunk.page_content)
+        # lưu chunk_id vào metadata (ghi đè nếu có)
+        if chunk.metadata is None:
+            chunk.metadata = {}
+        chunk.metadata["chunk_id"] = cid
+
+        if cid not in existing_ids:
             new_chunks.append(chunk)
 
-    # --- Thêm chunk mới vào vectorstore ---
-    if new_chunks:
-        QdrantVectorStore.from_documents(
-            documents=new_chunks,
-            embedding=embeddings,
-            host=host,
-            port=port,
-            collection_name=collection_name,
-        )
-        logger.info(f"Đã thêm {len(new_chunks)} chunk mới vào collection '{collection_name}'")
-    else:
-        logger.info("Không có chunk mới để thêm.")
+    logger.info(f"{len(new_chunks)} chunk mới sẽ được thêm vào collection")
 
-    return QdrantVectorStore(
+    # 8. Tạo instance vectorstore với client đã khởi tạo
+    vectorstore = QdrantVectorStore(
         client=client,
         collection_name=collection_name,
         embedding=embeddings,
     )
+
+    # 9. Thêm chunk mới bằng API của vectorstore (đảm bảo không gọi QdrantClient.__init__ sai tham số)
+    if new_chunks:
+        # add_documents sẽ tự embed và upsert đúng cách
+        vectorstore.add_documents(new_chunks)
+        logger.info(f"Đã thêm {len(new_chunks)} chunk mới vào collection '{collection_name}'")
+    else:
+        logger.info("Không có chunk mới để thêm.")
+
+    return vectorstore
