@@ -12,3 +12,4 @@ openpyxl
 pdfminer.six
 qdrant-client
 langchain-qdrant
+python-dotenv 

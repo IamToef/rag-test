@@ -55,3 +55,6 @@ Những điểm cải tiến chính:
 	Stream response để UX tốt hơn
 
 ###Thời gian response lâu 
+
+
+python create_vectorstore.py --folder data --collection docs --cloud
