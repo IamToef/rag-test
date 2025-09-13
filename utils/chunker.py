@@ -3,20 +3,25 @@ from typing import List, Dict
 from langchain.docstore.document import Document
 from .config import CHUNK_SIZE, CHUNK_OVERLAP
 
+
 def chunk_documents(docs: List[Document]) -> List[Document]:
     """
-    Chunking tài liệu nâng cao:
+    Chunking tài liệu nâng cao + Payload:
     - Part → Section → Subsection
     - Extract tables → chunk type 'table'
     - Extract operation blocks → chunk type 'operation'
-    - Text còn lại → chunk type 'text', chia theo CHUNK_SIZE + CHUNK_OVERLAP
+    - Text còn lại → chunk type 'text'
+    - Mỗi chunk có ID duy nhất để tránh trùng lặp
     """
     chunks = []
+    global_idx = 0  # tăng dần cho mỗi chunk
 
     for doc in docs:
         text = doc.page_content.strip()
         if not text:
             continue
+
+        source_file = doc.metadata.get("source_file", "unknown_file")
 
         # 1. Split by Part
         parts = re.split(r'(?m)^PART\s+\d+[:\-]?\s+[^\n]+', text)
@@ -43,8 +48,8 @@ def chunk_documents(docs: List[Document]) -> List[Document]:
                     continue
 
                 # 3. Split by Subsection
-                subsections = re.split(r'(?m)^\d+\.\d+\.\d+\s+[^\n]+', section)
-                subsection_titles = re.findall(r'(?m)^\d+\.\d+\.\d+\s+[^\n]+', section)
+                subsections = re.split(r'(?m)^\d+(?:\.\d+){2,}\s+[^\n]+', section)
+                subsection_titles = re.findall(r'(?m)^\d+(?:\.\d+){2,}\s+[^\n]+', section)
                 if not subsection_titles:
                     subsection_titles = ["Unknown Subsection"]
 
@@ -74,58 +79,86 @@ def chunk_documents(docs: List[Document]) -> List[Document]:
                         # Restore tables inside block
                         for placeholder, table in table_placeholders.items():
                             if placeholder in block:
+                                global_idx += 1
                                 chunks.append(Document(
                                     page_content=table['content'],
-                                    metadata={
-                                        **doc.metadata,
-                                        "part": part_title,
-                                        "section": section_title,
-                                        "subsection": subsection_title,
-                                        "type": "table"
-                                    }
+                                    metadata=build_payload(
+                                        doc.metadata,
+                                        part_title,
+                                        section_title,
+                                        subsection_title,
+                                        "table",
+                                        source_file,
+                                        global_idx
+                                    )
                                 ))
                                 block = block.replace(placeholder, "")
 
                         # Check if block is operation
                         if re.match(r'^Thao\s+tác\s+\d+[:\.]', block):
+                            global_idx += 1
                             chunks.append(Document(
                                 page_content=block,
-                                metadata={
-                                    **doc.metadata,
-                                    "part": part_title,
-                                    "section": section_title,
-                                    "subsection": subsection_title,
-                                    "type": "operation"
-                                }
+                                metadata=build_payload(
+                                    doc.metadata,
+                                    part_title,
+                                    section_title,
+                                    subsection_title,
+                                    "operation",
+                                    source_file,
+                                    global_idx
+                                )
                             ))
                         elif block.strip():
                             # Text block → cắt nhỏ nếu dài
                             if len(block) > CHUNK_SIZE:
                                 sub_blocks = split_long_block(block)
                                 for sub_block in sub_blocks:
+                                    global_idx += 1
                                     chunks.append(Document(
                                         page_content=sub_block,
-                                        metadata={
-                                            **doc.metadata,
-                                            "part": part_title,
-                                            "section": section_title,
-                                            "subsection": subsection_title,
-                                            "type": "text"
-                                        }
+                                        metadata=build_payload(
+                                            doc.metadata,
+                                            part_title,
+                                            section_title,
+                                            subsection_title,
+                                            "text",
+                                            source_file,
+                                            global_idx
+                                        )
                                     ))
                             else:
+                                global_idx += 1
                                 chunks.append(Document(
                                     page_content=block,
-                                    metadata={
-                                        **doc.metadata,
-                                        "part": part_title,
-                                        "section": section_title,
-                                        "subsection": subsection_title,
-                                        "type": "text"
-                                    }
+                                    metadata=build_payload(
+                                        doc.metadata,
+                                        part_title,
+                                        section_title,
+                                        subsection_title,
+                                        "text",
+                                        source_file,
+                                        global_idx
+                                    )
                                 ))
 
     return chunks
+
+
+def build_payload(base_meta: Dict, part: str, section: str, subsection: str,
+                  chunk_type: str, source_file: str, idx: int) -> Dict:
+    """
+    Chuẩn hóa payload (metadata) cho Qdrant.
+    Thêm chunk_id duy nhất.
+    """
+    return {
+        **base_meta,  # giữ metadata gốc (author, etc.)
+        "part": part,
+        "section": section,
+        "subsection": subsection,
+        "type": chunk_type,
+        "chunk_id": f"{source_file}__{idx:05d}"  # ví dụ: doc1.pdf__00042
+    }
 
 
 def extract_tables(text: str) -> List[Dict[str, str]]:
