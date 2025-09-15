@@ -14,7 +14,7 @@ if __name__ == "__main__":
     parser.add_argument("--cloud", action="store_true", help="Chạy với Qdrant Cloud thay vì local")
 
     # Local (fallback)
-    parser.add_argument("--host", type=str, default=os.getenv("QDRANT_HOST", "localhost"))
+    parser.add_argument("--host", type=str, default=os.getenv("QDRANT_HOST", "qdrant_server"))
     parser.add_argument("--port", type=int, default=int(os.getenv("QDRANT_PORT", "6333")))
 
     # Cloud

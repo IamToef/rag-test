@@ -44,26 +44,19 @@ def stream():
 
     return Response(generate(), mimetype="text/plain")
 
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run Flask RAG App with Qdrant")
     parser.add_argument(
-        "--mode",
-        choices=["local", "cloud"],
-        help="Chạy ở chế độ local hoặc cloud. Nếu không truyền thì dựa vào .env"
+        "--cloud",
+        action="store_true",
+        help="Chạy ở chế độ Qdrant Cloud. Nếu không truyền thì mặc định local."
     )
     args = parser.parse_args()
 
     collection_name = os.getenv("QDRANT_COLLECTION", "docs")
 
     # Xác định chế độ Local/Cloud
-    if args.mode == "cloud":
-        use_cloud = True
-    elif args.mode == "local":
-        use_cloud = False
-    else:
-        # fallback: tự động theo .env
-        use_cloud = bool(os.getenv("QDRANT_URL") and os.getenv("QDRANT_API_KEY"))
+    use_cloud = args.cloud
 
     # Load vectorstore từ Qdrant
     vectorstore = get_vectorstore(collection_name=collection_name, use_cloud=use_cloud)
@@ -71,3 +64,4 @@ if __name__ == "__main__":
 
     print(f"🚀 App running in {'CLOUD' if use_cloud else 'LOCAL'} mode")
     app.run(debug=True, use_reloader=False)
+

@@ -38,12 +38,6 @@ def ensure_collection_exists(
     else:
         logger.info(f"Collection '{collection_name}' đã tồn tại")
 
-
-def get_chunk_id(text: str) -> str:
-    """Tạo ID duy nhất cho mỗi chunk dựa trên nội dung"""
-    return hashlib.md5(text.encode("utf-8")).hexdigest()
-
-
 def get_existing_chunk_ids(client: QdrantClient, collection_name: str) -> Set[str]:
     """
     Lấy set ID của các chunk đã có trong collection.
@@ -126,19 +120,14 @@ def build_vectorstore(
     existing_ids = get_existing_chunk_ids(client, collection_name)
     logger.info(f"Đã có {len(existing_ids)} chunk trong collection '{collection_name}'")
 
-    # 7. Tạo list chunk mới (unique) và thêm metadata chunk_id
-    new_chunks: List[Document] = []
-    for chunk in chunks:
-        cid = get_chunk_id(chunk.page_content)
-        # lưu chunk_id vào metadata (ghi đè nếu có)
-        if chunk.metadata is None:
-            chunk.metadata = {}
-        chunk.metadata["chunk_id"] = cid
-
-        if cid not in existing_ids:
-            new_chunks.append(chunk)
+    # 7. Tạo list chunk mới (unique) dựa trên chunk_id
+    new_chunks: List[Document] = [
+        chunk for chunk in chunks 
+        if chunk.metadata.get("chunk_id") not in existing_ids
+    ]
 
     logger.info(f"{len(new_chunks)} chunk mới sẽ được thêm vào collection")
+
 
     # 8. Tạo instance vectorstore với client đã khởi tạo
     vectorstore = QdrantVectorStore(
