@@ -145,3 +145,43 @@ def build_vectorstore(
         logger.info("Không có chunk mới để thêm.")
 
     return vectorstore
+
+def remove_duplicates(client: QdrantClient, collection_name: str) -> None:
+    """
+    Xoá các chunk duplicate trong collection dựa trên nội dung (page_content).
+    Giữ lại chunk đầu tiên, xoá những bản trùng nội dung.
+    """
+    seen_texts = set()
+    duplicate_ids = []
+
+    # Scroll qua toàn bộ points trong collection
+    try:
+        points, _ = client.scroll(
+            collection_name=collection_name,
+            limit=10000,
+            with_payload=True,
+            with_vectors=False
+        )
+    except Exception as e:
+        logger.error(f"Không thể scroll collection '{collection_name}': {e}")
+        return
+
+    for p in points:
+        payload = getattr(p, "payload", None)
+        pid = getattr(p, "id", None)
+
+        if not payload or not pid:
+            continue
+
+        text = payload.get("page_content")
+        if text in seen_texts:
+            duplicate_ids.append(pid)
+        else:
+            seen_texts.add(text)
+
+    if duplicate_ids:
+        client.delete(collection_name=collection_name, points_selector=duplicate_ids)
+        logger.info(f"Đã xoá {len(duplicate_ids)} chunks duplicate trong collection '{collection_name}'")
+    else:
+        logger.info(f"Không tìm thấy duplicate trong collection '{collection_name}'")
+

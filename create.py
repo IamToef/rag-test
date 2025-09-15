@@ -1,6 +1,6 @@
 import argparse
 import os
-from utils.ingest import build_vectorstore
+from utils.ingest import build_vectorstore, remove_duplicates
 from dotenv import load_dotenv
 
 if __name__ == "__main__":
@@ -31,6 +31,7 @@ if __name__ == "__main__":
             url=args.url,
             api_key=args.api_key,
         )
+        remove_duplicates(vectorstore.client, "docs")
         print(f"Vectorstore '{args.collection}' đã được tạo/cập nhật trên cloud!")
     else:
         # Local mode
@@ -40,4 +41,5 @@ if __name__ == "__main__":
             host=args.host,
             port=args.port,
         )
+        remove_duplicates(vectorstore.client, "docs")
         print(f"Vectorstore '{args.collection}' đã được tạo/cập nhật trên local!")

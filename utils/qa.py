@@ -12,3 +12,4 @@ def build_qa_chain(vectorstore):
         chain_type="stuff",
         chain_type_kwargs={"prompt": VIETNAMESE_PROMPT}
     )
+

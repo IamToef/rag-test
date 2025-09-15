@@ -196,3 +196,4 @@ def split_long_block(block: str) -> List[str]:
         sub_blocks.append(block[start:end])
         start = end - CHUNK_OVERLAP
     return sub_blocks
+
