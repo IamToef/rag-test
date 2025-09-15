@@ -62,6 +62,6 @@ if __name__ == "__main__":
     vectorstore = get_vectorstore(collection_name=collection_name, use_cloud=use_cloud)
     qa_chain = build_qa_chain(vectorstore)
 
-    print(f"🚀 App running in {'CLOUD' if use_cloud else 'LOCAL'} mode")
+    print(f"App running in {'cloud' if use_cloud else 'local'} mode")
     app.run(debug=True, use_reloader=False)
 
