@@ -4,7 +4,9 @@ from .config import LANGUAGE_MODEL
 from .prompt import VIETNAMESE_PROMPT
 
 def build_qa_chain(vectorstore):
-    retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
+    retriever = vectorstore.as_retriever(search_kwargs={
+        "k": 5,
+        "score_threshold": 0.7})
     llm = OllamaLLM(model=LANGUAGE_MODEL)
     return RetrievalQA.from_chain_type(
         llm=llm,

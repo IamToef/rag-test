@@ -4,146 +4,125 @@ from langchain.docstore.document import Document
 from .config import CHUNK_SIZE, CHUNK_OVERLAP
 
 
-def chunk_documents(docs: List[Document]) -> List[Document]:
+from typing import List
+from langchain.docstore.document import Document
+
+import re
+from typing import List
+from langchain.docstore.document import Document
+
+def chunk_documents(docs: List[Document], CHUNK_SIZE=CHUNK_SIZE, CHUNK_OVERLAP=CHUNK_OVERLAP) -> List[Document]:
     """
-    Chunking tài liệu nâng cao + Payload:
-    - Part → Section → Subsection
-    - Extract tables → chunk type 'table'
-    - Extract operation blocks → chunk type 'operation'
-    - Text còn lại → chunk type 'text'
-    - Mỗi chunk có ID duy nhất để tránh trùng lặp
+    Chunk theo từng trang:
+    - Mỗi trang được xử lý độc lập
+    - Trong mỗi trang:
+        + Table => chunk type 'table'
+        + Operation => chunk type 'operation'
+        + Text còn lại => chunk type 'text' (chia nhỏ nếu dài hơn CHUNK_SIZE)
+    - Mỗi chunk có chunk_id duy nhất, metadata giữ source_file + page_number + chunk_type
     """
     chunks = []
-    global_idx = 0  # tăng dần cho mỗi chunk
+    global_idx = 0
 
     for doc in docs:
-        text = doc.page_content.strip()
-        if not text:
-            continue
+        # --- Tách thành các trang ---
+        pages = re.split(r'\f', doc.page_content)
+        if len(pages) == 1:
+            # fallback: giả sử mỗi 50 dòng = 1 trang
+            lines = doc.page_content.splitlines()
+            page_size = 50
+            pages = ['\n'.join(lines[i:i + page_size]) for i in range(0, len(lines), page_size)]
 
         source_file = doc.metadata.get("source_file", "unknown_file")
 
-        # 1. Split by Part
-        parts = re.split(r'(?m)^PART\s+\d+[:\-]?\s+[^\n]+', text)
-        part_titles = re.findall(r'(?m)^PART\s+\d+[:\-]?\s+[^\n]+', text)
-        if not part_titles:
-            part_titles = ["Unknown Part"]
-
-        for idx, part in enumerate(parts):
-            part_title = part_titles[idx] if idx < len(part_titles) else "Unknown Part"
-            part = part.strip()
-            if not part:
+        # --- Duyệt từng trang ---
+        for page_number, page_text in enumerate(pages, start=1):
+            page_text = page_text.strip()
+            if not page_text:
                 continue
 
-            # 2. Split by Section
-            sections = re.split(r'(?m)^\d+\.\d+\s+[^\n]+', part)
-            section_titles = re.findall(r'(?m)^\d+\.\d+\s+[^\n]+', part)
-            if not section_titles:
-                section_titles = ["Unknown Section"]
+            # 1. Extract tables
+            tables = extract_tables(page_text)
+            table_placeholders = {}
+            page_remaining = page_text
+            for tidx, table in enumerate(tables):
+                placeholder = f"__TABLE_{tidx}__"
+                table_placeholders[placeholder] = table
+                page_remaining = page_remaining.replace(table['content'], placeholder)
 
-            for sidx, section in enumerate(sections):
-                section_title = section_titles[sidx] if sidx < len(section_titles) else "Unknown Section"
-                section = section.strip()
-                if not section:
+            # 2. Split theo operation hoặc text
+            blocks = re.split(r'(?m)^(?=Thao\s+tác\s+\d+[:\.])', page_remaining)
+
+            # 3. Xử lý từng block trong trang
+            for block in blocks:
+                block = block.strip()
+                if not block:
                     continue
 
-                # 3. Split by Subsection
-                subsections = re.split(r'(?m)^\d+(?:\.\d+){2,}\s+[^\n]+', section)
-                subsection_titles = re.findall(r'(?m)^\d+(?:\.\d+){2,}\s+[^\n]+', section)
-                if not subsection_titles:
-                    subsection_titles = ["Unknown Subsection"]
+                # Restore tables trước
+                for placeholder, table in table_placeholders.items():
+                    if placeholder in block:
+                        global_idx += 1
+                        chunks.append(Document(
+                            page_content=table['content'],
+                            metadata={
+                                **doc.metadata,
+                                "source_file": source_file,
+                                "page_number": page_number,
+                                "chunk_type": "table",
+                                "chunk_id": f"{source_file}__{page_number:03d}__{global_idx:05d}"
+                            }
+                        ))
+                        block = block.replace(placeholder, "")
 
-                for subidx, subsection in enumerate(subsections):
-                    subsection_title = subsection_titles[subidx] if subidx < len(subsection_titles) else "Unknown Subsection"
-                    subsection = subsection.strip()
-                    if not subsection:
-                        continue
+                if not block.strip():
+                    continue
 
-                    # --- 4. Extract Tables ---
-                    tables = extract_tables(subsection)
-                    table_placeholders = {}
-                    section_text = subsection
-                    for tidx, table in enumerate(tables):
-                        placeholder = f"__TABLE_{tidx}__"
-                        table_placeholders[placeholder] = table
-                        section_text = section_text.replace(table['content'], placeholder)
+                # Operation block
+                if re.match(r'^Thao\s+tác\s+\d+[:\.]', block):
+                    global_idx += 1
+                    chunks.append(Document(
+                        page_content=block,
+                        metadata={
+                            **doc.metadata,
+                            "source_file": source_file,
+                            "page_number": page_number,
+                            "chunk_type": "operation",
+                            "chunk_id": f"{source_file}__{page_number:03d}__{global_idx:05d}"
+                        }
+                    ))
 
-                    # --- 5. Split operation blocks ---
-                    blocks = re.split(r'(?m)^(?=Thao\s+tác\s+\d+[:\.])', section_text)
-
-                    for block in blocks:
-                        block = block.strip()
-                        if not block:
-                            continue
-
-                        # Restore tables inside block
-                        for placeholder, table in table_placeholders.items():
-                            if placeholder in block:
-                                global_idx += 1
-                                chunks.append(Document(
-                                    page_content=table['content'],
-                                    metadata=build_payload(
-                                        doc.metadata,
-                                        part_title,
-                                        section_title,
-                                        subsection_title,
-                                        "table",
-                                        source_file,
-                                        global_idx
-                                    )
-                                ))
-                                block = block.replace(placeholder, "")
-
-                        # Check if block is operation
-                        if re.match(r'^Thao\s+tác\s+\d+[:\.]', block):
+                # Text block
+                else:
+                    if len(block) > CHUNK_SIZE:
+                        sub_blocks = split_long_block(block)
+                        for sub_block in sub_blocks:
                             global_idx += 1
                             chunks.append(Document(
-                                page_content=block,
-                                metadata=build_payload(
-                                    doc.metadata,
-                                    part_title,
-                                    section_title,
-                                    subsection_title,
-                                    "operation",
-                                    source_file,
-                                    global_idx
-                                )
+                                page_content=sub_block,
+                                metadata={
+                                    **doc.metadata,
+                                    "source_file": source_file,
+                                    "page_number": page_number,
+                                    "chunk_type": "text",
+                                    "chunk_id": f"{source_file}__{page_number:03d}__{global_idx:05d}"
+                                }
                             ))
-                        elif block.strip():
-                            # Text block → cắt nhỏ nếu dài
-                            if len(block) > CHUNK_SIZE:
-                                sub_blocks = split_long_block(block)
-                                for sub_block in sub_blocks:
-                                    global_idx += 1
-                                    chunks.append(Document(
-                                        page_content=sub_block,
-                                        metadata=build_payload(
-                                            doc.metadata,
-                                            part_title,
-                                            section_title,
-                                            subsection_title,
-                                            "text",
-                                            source_file,
-                                            global_idx
-                                        )
-                                    ))
-                            else:
-                                global_idx += 1
-                                chunks.append(Document(
-                                    page_content=block,
-                                    metadata=build_payload(
-                                        doc.metadata,
-                                        part_title,
-                                        section_title,
-                                        subsection_title,
-                                        "text",
-                                        source_file,
-                                        global_idx
-                                    )
-                                ))
+                    else:
+                        global_idx += 1
+                        chunks.append(Document(
+                            page_content=block,
+                            metadata={
+                                **doc.metadata,
+                                "source_file": source_file,
+                                "page_number": page_number,
+                                "chunk_type": "text",
+                                "chunk_id": f"{source_file}__{page_number:03d}__{global_idx:05d}"
+                            }
+                        ))
 
     return chunks
-
+6
 
 def build_payload(base_meta: Dict, part: str, section: str, subsection: str,
                   chunk_type: str, source_file: str, idx: int) -> Dict:

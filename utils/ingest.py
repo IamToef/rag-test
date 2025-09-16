@@ -40,41 +40,47 @@ def ensure_collection_exists(
 
 def get_existing_chunk_ids(client: QdrantClient, collection_name: str) -> Set[str]:
     """
-    Lấy set ID của các chunk đã có trong collection.
-    Thực hiện robustly vì client.scroll() trả về kiểu khác nhau giữa các phiên bản.
+    Lấy toàn bộ ID của các chunk đã có trong collection (scroll toàn bộ, không giới hạn 10k).
     """
     existing_ids: Set[str] = set()
+    next_page = None
+
     try:
-        resp = client.scroll(collection_name=collection_name, limit=10000, with_payload=False, with_vectors=False)
+        while True:
+            resp = client.scroll(
+                collection_name=collection_name,
+                limit=1000,  # page size
+                offset=next_page,
+                with_payload=False,
+                with_vectors=False
+            )
 
-        # resp có thể là:
-        # - tuple/list: (points, next_page)
-        # - object có attribute 'points'
-        # - list of points
-        if isinstance(resp, (tuple, list)):
-            points = resp[0]
-        elif hasattr(resp, "points"):
-            points = resp.points
-        else:
-            points = resp  # fallback
+            # resp có thể là tuple (points, next_page)
+            if isinstance(resp, (tuple, list)):
+                points, next_page = resp
+            elif hasattr(resp, "points"):
+                points, next_page = resp.points, getattr(resp, "next_page_offset", None)
+            else:
+                points, next_page = resp, None
 
-        for p in points:
-            # p có thể là object (has attr id) hoặc dict
-            pid = getattr(p, "id", None)
-            if pid is None and isinstance(p, dict):
-                pid = p.get("id")
-            if pid is not None:
-                existing_ids.add(str(pid))
+            for p in points:
+                pid = getattr(p, "id", None)
+                if pid is None and isinstance(p, dict):
+                    pid = p.get("id")
+                if pid is not None:
+                    existing_ids.add(str(pid))
+
+            if not next_page:
+                break
+
     except Exception as e:
         logger.warning(f"Không lấy được IDs hiện có: {e}")
-    return existing_ids
 
+    return existing_ids
 
 def build_vectorstore(
     folder_path: str = "data",
     collection_name: str = "docs",
-    host: Optional[str] = None,
-    port: Optional[int] = None,
     url: Optional[str] = None,
     api_key: Optional[str] = None,
 ) -> QdrantVectorStore:
@@ -92,15 +98,11 @@ def build_vectorstore(
     if url and api_key:
         logger.info("Kết nối Qdrant Cloud...")
         client = QdrantClient(url=url, api_key=api_key)
-    else:
-        host_val = host or "localhost"
-        port_val = port or 6333
-        logger.info(f"Kết nối Qdrant Local tại {host_val}:{port_val} ...")
-        client = QdrantClient(host=host_val, port=port_val)
 
     # 3. Lấy dimension từ 1 embedding mẫu (để tạo collection nếu cần)
     test_vector = embeddings.embed_query("dimension check")
     vector_size = len(test_vector)
+    print("Number of dimension per embedding: " + str(vector_size) + " dimensions")
 
     # 4. Đảm bảo collection tồn tại
     ensure_collection_exists(client, collection_name, vector_size)

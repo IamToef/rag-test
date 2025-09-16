@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <title>Trợ lý Ảo FAQ</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <!-- Markdown rendering -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <!-- Highlight.js for code syntax highlighting -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/highlight.min.js"></script>
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <h1><i class="fas fa-robot"></i> Trợ lý Ảo FAQ</h1>
+                <p>Hỏi đáp thông minh về sản phẩm và dịch vụ</p>
+            </div>
+        </header>
+
+        <!-- Main chat area -->
+        <main class="chat-container">
+            <div class="chat-messages" id="chatMessages">
+                <!-- Welcome message -->
+                <div class="welcome-message">
+                    <div class="avatar">
+                        <i class="fas fa-robot"></i>
+                    </div>
+                    <div class="message-content">
+                        <h3>Xin chào! Tôi là trợ lý ảo</h3>
+                        <p>Tôi có thể giúp bạn trả lời các câu hỏi thường gặp về sản phẩm và dịch vụ.</p>
+                        <div class="suggested-questions">
+                            <p>Bạn có thể hỏi tôi:</p>
+                            <div class="question-chips">
+                                <div class="chip" data-question="Sản phẩm này có những tính năng gì?">Sản phẩm này có những tính năng gì?</div>
+                                <div class="chip" data-question="Làm thế nào để đặt hàng?">Làm thế nào để đặt hàng?</div>
+                                <div class="chip" data-question="Chính sách đổi trả như thế nào?">Chính sách đổi trả như thế nào?</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Input area -->
+        <footer class="chat-input-container">
+            <div class="chat-input-wrapper">
+                <div class="chat-input">
+                    <textarea 
+                        id="userInput" 
+                        placeholder="Nhập câu hỏi của bạn..." 
+                        rows="1"
+                        autocomplete="off"
+                    ></textarea>
+                    <button id="sendButton" class="send-button">
+                        <i class="fas fa-paper-plane"></i>
+                    </button>
+                </div>
+                <div class="disclaimer">
+                    <p>Trợ lý ảo có thể mắc lỗi. Vui lòng kiểm tra lại thông tin quan trọng.</p>
+                </div>
+            </div>
+        </footer>
+    </div>
+
+    <!-- Load các file JavaScript -->
+    <script src="{{ url_for('static', filename='js/api.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/ui.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>
