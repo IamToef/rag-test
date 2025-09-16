@@ -29,8 +29,12 @@ def stream():
     session["conversation"].append({"role": "user", "content": query})
     session.modified = True
 
+    start = time.time()
+    print(start)
     result = qa_chain.invoke({"query": query})
     answer = result if isinstance(result, str) else result.get("result", "")
+    end = time.time()
+    print (end)
 
     @stream_with_context
     def generate():
@@ -59,7 +63,11 @@ if __name__ == "__main__":
     use_cloud = args.cloud
 
     # Load vectorstore từ Qdrant
+    start1 = time.time()
+    print("Start1:",start1)
     vectorstore = get_vectorstore(collection_name=collection_name, use_cloud=use_cloud)
+    end1 = time.time()
+    print("end1", end1)
     qa_chain = build_qa_chain(vectorstore)
 
     print(f"App running in {'cloud' if use_cloud else 'local'} mode")
