@@ -1,6 +1,0 @@
-docker run -d --name qdrant-server -p 6333:6333 qdrant/qdrant ; python app.py 
-
-"Thêm" --refresh nếu muốn build lại
-
-python create.py --cloud : chạy cloud
-python app.py --cloud: Lấy dữ liệu từ cloud.
