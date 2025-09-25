@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams
 from langchain_qdrant import QdrantVectorStore
-from langchain_ollama import ChatOllama
+from langchain_openai import ChatOpenAI
 from huggingface_hub import InferenceClient
 from langchain_core.embeddings import Embeddings
 
@@ -18,11 +18,12 @@ os.environ["USER_AGENT"] = os.getenv("USER_AGENT", "ragtest/1.0 (https://example
 
 # ----------------- LLM -----------------
 def get_llms():
-    """Trả về LLM Ollama"""
-    llm = ChatOllama(model="mistral")
+    llm = ChatOpenAI(
+        model="gpt-4.1-mini",   # hoặc "gpt-4o-mini" tùy bạn muốn loại nào
+        temperature=0,          # chỉnh độ sáng tạo (0 = chính xác, >0 = sáng tạo hơn)
+        api_key=os.getenv("OPENAI_API_KEY")  # key bạn đã có sẵn
+    )
     return llm
-
-
 # ----------------- Embeddings -----------------
 class HuggingFaceEmbeddings(Embeddings):
     """Wrapper cho HF Inference API để dùng làm embeddings trong LangChain."""
@@ -48,7 +49,7 @@ def get_embeddings():
 
 
 # ----------------- Vector Store -----------------
-def get_vector_store(collection_name="docs"):
+def get_vector_store(collection_name="my_collection"):
     embeddings = get_embeddings()
 
     # Kết nối Qdrant

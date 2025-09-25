@@ -2,17 +2,16 @@
 import os
 import hashlib
 import json
-import bs4
 from langchain_community.document_loaders import (
     PyPDFLoader,
     Docx2txtLoader,
     TextLoader,
-    WebBaseLoader
 )
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from utils.config import get_vector_store
+from langchain_experimental.text_splitter import SemanticChunker
+from utils.config import get_vector_store, get_embeddings
+import time
 
-
+embeddings = get_embeddings()
 class DataManager:
     def __init__(self, collection_name: str = "default", hash_file: str = "data_hash.json"):
         """
@@ -33,24 +32,29 @@ class DataManager:
 
     def reset(self):
         """
-        Clear all documents from the vector store.
+        Clear all documents from the vector store (Qdrant).
         """
-        if hasattr(self.vector_store, "delete_collection"):
-            self.vector_store.delete_collection()
-            print(f"🗑️ Vector store '{self.collection_name}' has been reset.")
+        # Với Qdrant trong langchain_community, cần gọi client.delete_collection
+        if hasattr(self.vector_store, "client"):
+            try:
+                self.vector_store.client.delete_collection(self.collection_name)
+                print(f"Collection '{self.collection_name}' has been deleted.")
+            except Exception as e:
+                print(f"Failed to delete collection: {e}")
+            # Tạo lại vector_store rỗng
             self.vector_store = get_vector_store(collection_name=self.collection_name)
         else:
+            # fallback cho in-memory vectorstore
             if hasattr(self.vector_store, "_vectors"):
                 self.vector_store._vectors.clear()
-            print(f"🗑️ Vector store '{self.collection_name}' cleared (in-memory fallback).")
+            print(f"Vector store '{self.collection_name}' cleared (in-memory fallback).")
 
-    def _compute_data_hash(self, folder_path=None, web_urls=None):
+    def _compute_data_hash(self, folder_path=None):
         """
-        Compute a hash based on file names, sizes, and web URLs.
+        Compute a hash based on file names, sizes, and modification times.
         Used to detect changes for smart reload.
         """
         m = hashlib.md5()
-        # Folder files
         if folder_path and os.path.exists(folder_path):
             for root, _, files in os.walk(folder_path):
                 for file in sorted(files):
@@ -62,10 +66,6 @@ class DataManager:
                         m.update(str(stat.st_size).encode())
                     except Exception:
                         continue
-        # Web URLs
-        if web_urls:
-            for url in sorted(web_urls):
-                m.update(url.encode())
         return m.hexdigest()
 
     def _save_hash(self):
@@ -76,33 +76,27 @@ class DataManager:
             with open(self.hash_file, "w") as f:
                 json.dump({"hash": self._data_hash}, f)
         except Exception as e:
-            print(f"⚠️ Failed to save hash file: {e}")
+            print(f"Failed to save hash file: {e}")
 
-    def smart_reload(self, folder_path=None, web_urls=None, **kwargs):
-        new_hash = self._compute_data_hash(folder_path, web_urls)
+    def smart_reload(self, folder_path=None, **kwargs):
+        new_hash = self._compute_data_hash(folder_path)
         if self._data_hash != new_hash:
-            print("🔄 Changes detected. Resetting and reloading vector store...")
+            print("Changes detected. Resetting and reloading vector store...")
             self.reset()
-            self.load_and_index(
-                folder_path=folder_path,
-                **kwargs
-            )
+            self.load_and_index(folder_path=folder_path, **kwargs)
             self._data_hash = new_hash
             self._save_hash()
-            print("✅ Smart reload complete!")
+            print("Smart reload complete!")
         else:
-            print("ℹ️ No changes detected. Vector store is up-to-date.")
+            print("No changes detected. Vector store is up-to-date.")
 
     def load_and_index(
         self,
-        folder_path: str = None,
-        web_urls: list[str] = None,
-        chunk_size: int = 1536,
-        chunk_overlap: int = 536
+        folder_path: str = None
     ):
         """
-        Load documents from folder and/or web, chunk them, and add to vector store.
-        Supports .pdf, .docx, .txt, .md files and web URLs.
+        Load documents from folder, chunk them, and add to vector store.
+        Supports .pdf, .docx, .txt, .md files.
         """
         docs = []
 
@@ -110,9 +104,9 @@ class DataManager:
         if folder_path:
             folder_path = folder_path.strip()
             if not os.path.exists(folder_path):
-                print(f"⚠️ Folder path does not exist: {folder_path}")
+                print(f"Folder path does not exist: {folder_path}")
             else:
-                print(f"📂 Scanning folder: {folder_path}")
+                print(f"Scanning folder: {folder_path}")
                 for root, _, files in os.walk(folder_path):
                     for file in files:
                         file_clean = file.strip()
@@ -127,42 +121,30 @@ class DataManager:
                         elif ext in ("txt", "md"):
                             loader = TextLoader(file_path)
                         else:
-                            print(f"⚠️ Skipping unsupported file type: {file_clean}")
+                            print(f"Skipping unsupported file type: {file_clean}")
                             continue
 
                         try:
                             file_docs = loader.load()
-                            print(f"✅ Loaded {len(file_docs)} docs from {file_clean}")
+                            print(f"Loaded {len(file_docs)} docs from {file_clean}")
                             docs.extend(file_docs)
                         except Exception as e:
-                            print(f"⚠️ Failed to load {file_clean}: {e}")
-
-        # ----- WEB LOADING -----
-        if web_urls:
-            for url in web_urls:
-                try:
-                    loader = WebBaseLoader(url)
-                    url_docs = loader.load()
-                    print(f"🌐 Loaded {len(url_docs)} docs from {url}")
-                    docs.extend(url_docs)
-                except Exception as e:
-                    print(f"⚠️ Failed to load {url}: {e}")
+                            print(f"Failed to load {file_clean}: {e}")
 
         # ----- CHUNKING -----
         if not docs:
-            print("⚠️ No documents loaded. Nothing to index.")
+            print("No documents loaded. Nothing to index.")
             return self.vector_store
-
-        text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=chunk_size,
-            chunk_overlap=chunk_overlap
+        start = time.time()
+        text_splitter = SemanticChunker(
+            embeddings=embeddings
         )
         all_splits = text_splitter.split_documents(docs)
         print(f"Chunked into {len(all_splits)} pieces")
-
+        end = time.time()
+        print(f"Chunking took {end - start:.2f} seconds")
         # ----- INDEXING -----
         _ = self.vector_store.add_documents(documents=all_splits)
         print(f"Indexed {len(all_splits)} chunks into vector store")
 
         return self.vector_store
-

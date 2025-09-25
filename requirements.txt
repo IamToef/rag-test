@@ -4,6 +4,5 @@ langchain
 langgraph
 langchain-nomic
 langchain-community
-bs4
 docx2txt
 huggingface-hub

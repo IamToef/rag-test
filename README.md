@@ -1,24 +1,26 @@
 WORKFLOW:
 
 create.py:
-load_data.py -> set collection name
--> thực hiện smart_reload:
-    -> Tính hash. Nếu != hash ban đầu được truyền vào
-        -> reset vectorstore.
-        -> Nếu có collection -> xóa collection đó, tạo lại
-        -> hàm load_and index() -> load file -> chunking -> return vector_store
-
+set class DataManager from indexing.py
+smart_reload(): 
+if changes detected: (!= the originated hash)
+    reset and reload data to vectorstore
+    -> load docs and chunk them (Semantic chunking, using the embedding model) -> save the hash.
+else: do nothing
 
 main.py:
-get_vector_store()
-    -> Input -> exit hoặc quit -> out chương trình
-            -> clear -> xóa history
-            -> history -> check history
-        add message vào history -> agent_executor()
+chatbot setting up
+after setting up:
+    input questions.
+    if "exit":
+        break
+    invoke from graphs (question & chat history)
 
+graph.py:
+- add 3 nodes: (analyze_query + retrieve + generate)
+- add edges: (begin -> analyze query -> retrieve -> generate)
 
-agent_executor -> llm -> tool (retrieve)    -> checkpoint memory
-                                            -> set threshold -> in ra snippet, tính simmularity_search_with_relevance_score
-                                            -> kết quả + thời gian chạy
-
-
+pipeline.py:
+- analyze_query:
+- retrieve:
+- generate:
