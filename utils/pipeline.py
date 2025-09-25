@@ -17,11 +17,30 @@ def analyze_query(state: State, llm):
     query = structured_llm.invoke(state["question"])
     return {"query": query}
 
-def retrieve(state: State, vector_store):
+def retrieve(state: State, vector_store, k: int = 10):
     query = state["query"]
-    retriever = vector_store.as_retriever()
-    retrieved_docs = retriever.invoke(query["query"])
+
+    # Lấy nhiều kết quả (vd: k=10)
+    results = vector_store.similarity_search_with_score(query["query"], k=k)
+
+    # Sắp xếp theo distance tăng dần (gần nhất trước)
+    results = sorted(results, key=lambda x: x[1])
+
+    print(f"\n🔎 Top 3 kết quả gần nhất cho query: '{query['query']}'")
+    for i, (doc, distance) in enumerate(results[:3], start=1):
+        print(f"{i}. Page: {doc.metadata.get('page', 'N/A')}, "
+              f"ID: {doc.metadata.get('_id', 'N/A')}, "
+              f"Source: {doc.metadata.get('source', 'N/A')}"
+              f", Distance: {distance:.4f}")
+
+    # vẫn trả về toàn bộ k docs cho pipeline
+    retrieved_docs = []
+    for doc, distance in results:
+        doc.metadata["distance"] = distance
+        retrieved_docs.append(doc)
+
     return {"context": retrieved_docs}
+
 
 def generate(state: State, llm):
     docs_content = "\n\n".join(doc.page_content for doc in state["context"])
