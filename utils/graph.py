@@ -1,6 +1,5 @@
 from langgraph.graph import START, StateGraph
 from utils.schema import State
-from langgraph.checkpoint import FileSaver
 from utils.pipeline import analyze_query, retrieve, generate
 
 def build_graph(llm, vector_store, checkpointer=None):
@@ -14,5 +13,4 @@ def build_graph(llm, vector_store, checkpointer=None):
     graph_builder.add_edge("analyze_query", "retrieve")
     graph_builder.add_edge("retrieve", "generate")
 
-    checkpointer = FileSaver("state.json")
     return graph_builder.compile(checkpointer=checkpointer)
